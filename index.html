@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>NEON ZERO: FINAL RELEASE</title>
+    <style>
+        /* === 核心样式重置 === */
+        * { box-sizing: border-box; touch-action: none; user-select: none; -webkit-user-select: none; }
+        body, html {
+            width: 100%; height: 100%; margin: 0; background: #050505;
+            font-family: "Segoe UI", "Roboto", "Helvetica Neue", sans-serif;
+            overflow: hidden;
+        }
+        canvas { display: block; width: 100%; height: 100%; }
+
+        /* === UI 层 === */
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
+        
+        /* 顶部 HUD */
+        .hud-container {
+            display: flex; justify-content: space-between; padding: 20px; align-items: flex-start;
+        }
+        .score-box { text-shadow: 0 0 15px #0ff; }
+        .score-num { font-size: 2.8rem; color: #fff; font-weight: 900; line-height: 0.9; font-style: italic; }
+        .score-lbl { font-size: 0.8rem; color: #0ff; letter-spacing: 2px; font-weight: bold; }
+
+        .hp-container { text-align: right; }
+        .hp-lbl { font-size: 0.8rem; color: #0ff; letter-spacing: 2px; font-weight: bold; margin-bottom: 5px; }
+        .hp-bars { display: flex; gap: 6px; }
+        .hp-unit { 
+            width: 35px; height: 10px; background: #0ff; 
+            transform: skewX(-20deg); transition: 0.2s; box-shadow: 0 0 8px #0ff; 
+        }
+        .hp-unit.lost { background: #333; box-shadow: none; opacity: 0.3; }
+
+        /* 动态提示文字 */
+        #center-msg {
+            position: absolute; top: 30%; width: 100%; text-align: center;
+            font-size: 2rem; color: #fd0; font-weight: 800; letter-spacing: 2px;
+            text-shadow: 0 2px 4px #000; opacity: 0; transition: transform 0.1s, opacity 0.3s;
+        }
+
+        /* 教学操作提示 */
+        #tut-hint {
+            position: absolute; bottom: 22%; width: 100%; text-align: center;
+            font-size: 2.5rem; color: #fff; font-weight: 900; letter-spacing: 4px;
+            text-shadow: 0 0 30px #0ff; display: none;
+            animation: pulse 0.5s infinite alternate;
+        }
+
+        /* === 虚拟控制器 (兼容鼠标/触摸) === */
+        #controls {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 20;
+            pointer-events: none; /* 默认穿透 */
+        }
+        
+        .joy-zone {
+            position: absolute; bottom: 50px; left: 40px; width: 160px; height: 160px;
+            border: 2px dashed rgba(255,255,255,0.15); border-radius: 50%;
+            pointer-events: auto; cursor: crosshair; /* PC 鼠标支持 */
+        }
+        .joy-stick {
+            position: absolute; top: 50%; left: 50%; width: 60px; height: 60px;
+            background: rgba(0,255,255,0.2); border: 2px solid #0ff; border-radius: 50%;
+            transform: translate(-50%, -50%); pointer-events: none; box-shadow: 0 0 15px rgba(0,255,255,0.2);
+        }
+
+        .btn-action {
+            position: absolute; bottom: 60px; right: 40px; width: 110px; height: 110px;
+            background: rgba(255,50,80,0.2); border: 4px solid #f46; border-radius: 50%;
+            pointer-events: auto; cursor: pointer; 
+            display: flex; align-items: center; justify-content: center;
+            color: #fff; font-weight: 800; font-size: 1.2rem; letter-spacing: 1px;
+            box-shadow: 0 0 20px rgba(255,0,0,0.2); user-select: none;
+        }
+        .btn-action:active { background: rgba(255,255,255,0.4); transform: scale(0.92); }
+
+        /* === 遮罩层 === */
+        #overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(5,5,8,0.96); z-index: 100;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            pointer-events: auto;
+        }
+        .title-main { 
+            font-size: 4rem; color: #fff; margin: 0; font-style: italic; letter-spacing: -2px;
+            text-shadow: 0 0 30px #0ff; line-height: 0.9; 
+        }
+        .title-sub { font-size: 1rem; color: #888; margin-top: 10px; letter-spacing: 4px; }
+        
+        #result-box { 
+            margin: 20px 0; text-align: center; display: none; 
+        }
+        .final-score { color: #fd0; font-size: 2.5rem; font-weight: bold; text-shadow: 0 0 20px #f90; }
+        
+        .btn-start {
+            margin-top: 40px; padding: 15px 60px; font-size: 1.5rem; font-weight: 900;
+            background: #0ff; border: none; color: #000; cursor: pointer;
+            clip-path: polygon(15% 0, 100% 0, 100% 70%, 85% 100%, 0 100%, 0 30%);
+            transition: 0.1s; box-shadow: 0 0 20px rgba(0,255,255,0.3);
+        }
+        .btn-start:hover { background: #fff; transform: scale(1.05); }
+        .btn-start:active { transform: scale(0.95); }
+
+        /* 工具类 */
+        .hidden { display: none !important; }
+        @keyframes pulse { from{transform:scale(1);} to{transform:scale(1.1);} }
+    </style>
+</head>
+<body>
+
+    <!-- 游戏 UI -->
+    <div id="ui-layer">
+        <div class="hud-container">
+            <div class="score-box">
+                <div class="score-num" id="ui-score">0</div>
+                <div class="score-lbl">SYNCHRO RATE</div>
+            </div>
+            <div class="hp-container">
+                <div class="hp-lbl">ARMOR STATUS</div>
+                <div class="hp-bars" id="ui-hp">
+                    <div class="hp-unit"></div><div class="hp-unit"></div><div class="hp-unit"></div>
+                </div>
+            </div>
+        </div>
+        <div id="center-msg">READY</div>
+        <div id="tut-hint">点击格挡!</div>
+    </div>
+
+    <!-- 虚拟手柄 -->
+    <div id="controls">
+        <div class="joy-zone" id="joy-area">
+            <div class="joy-stick" id="joy-nub"></div>
+        </div>
+        <div class="btn-action" id="btn-parry">PARRY</div>
+    </div>
+
+    <!-- 启动界面 -->
+    <div id="overlay">
+        <h1 class="title-main">NEON<br><span style="color:#0ff">ZERO</span></h1>
+        <div class="title-sub">极速反应系统</div>
+        
+        <div id="result-box">
+            <div style="color:#f44; font-size:1.5rem; font-weight:bold;">链接中断</div>
+            <div class="final-score" id="end-score">0</div>
+        </div>
+        
+        <button class="btn-start" id="btn-launch">系统启动</button>
+        
+        <div style="margin-top:40px; font-size:0.8rem; color:#555; text-align:center;">
+            PC: WASD / 方向键移动 · 空格格挡<br>
+            Mobile: 左侧摇杆移动 · 右侧按钮格挡
+        </div>
+    </div>
+
+    <canvas id="c"></canvas>
+
+<script>
+/*
+   NEON ZERO GAME ENGINE
+   Built for performance and robust cross-platform support.
+*/
+window.addEventListener('load', function() {
+
+    // --- 1. 渲染环境初始化 (Context Init) ---
+    const canvas = document.getElementById('c');
+    // 性能优化: alpha: false 告诉浏览器不需要处理透明通道，显著提升 FPS
+    const ctx = canvas.getContext('2d', { alpha: false });
+    
+    let W = window.innerWidth;
+    let H = window.innerHeight;
+    canvas.width = W; canvas.height = H;
+
+    // 游戏全局状态
+    const Game = {
+        active: false,
+        score: 0,
+        lastTime: 0,
+        
+        // 时间管理
+        timeScale: 1.0, 
+        
+        // 实体容器
+        player: null,
+        entities: [],
+        particles: [],
+        
+        // 状态控制
+        tutorial: true,  // 是否在教学阶段
+        waitInput: false,// 是否处于等待用户输入的“时停”状态
+        
+        shake: 0,   // 屏幕震动幅度
+        freeze: 0   // 顿帧计数
+    };
+
+    // --- 2. Web Audio API 音频合成器 ---
+    const Audio = {
+        ctx: null,
+        init() {
+            try {
+                const AC = window.AudioContext || window.webkitAudioContext;
+                this.ctx = new AC();
+            } catch(e) { console.warn("Audio init failed", e); }
+        },
+        // 合成音效核心函数：频率, 波形, 持续时间, 音量, 频率滑块
+        play(freq, type, dur, vol=0.1, slide=0) {
+            if(!this.ctx) return;
+            try {
+                if(this.ctx.state === 'suspended') this.ctx.resume();
+                const t = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, t);
+                if(slide) osc.frequency.exponentialRampToValueAtTime(freq + slide, t + dur);
+                
+                gain.gain.setValueAtTime(vol, t);
+                gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+                
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(); osc.stop(t + dur);
+            } catch(e){}
+        },
+        // 音效预设库
+        parry: () => { Audio.play(600, 'square', 0.2, 0.2); setTimeout(()=>Audio.play(1200, 'sine', 0.3, 0.3), 50); },
+        hit:   () => { Audio.play(100, 'sawtooth', 0.4, 0.5); Audio.play(50, 'square', 0.4, 0.5); },
+        shoot: () => Audio.play(200, 'triangle', 0.1, 0.05),
+        kill:  () => Audio.play(150, 'square', 0.2, 0.2, -50),
+        slow:  () => Audio.play(440, 'sine', 1.0, 0.2), // 时缓音效
+        dull:  () => Audio.play(100, 'triangle', 0.3, 0.1)  // 系统代打沉闷音效
+    };
+
+    // --- 3. 输入控制系统 (统一 Pointer Events) ---
+    const Input = {
+        keys: {}, // 键盘状态
+        x: 0, y: 0, // 摇杆向量
+        init() {
+            // 键盘监听
+            window.addEventListener('keydown', e => {
+                this.keys[e.code] = true;
+                this.keys[e.key.toLowerCase()] = true; 
+                // 空格键触发格挡
+                if(e.code==='Space' && Game.player) Game.player.tryParry();
+            });
+            window.addEventListener('keyup', e => {
+                this.keys[e.code] = false;
+                this.keys[e.key.toLowerCase()] = false;
+            });
+
+            // 摇杆监听 (鼠标/触摸通用)
+            const area = document.getElementById('joy-area');
+            const nub = document.getElementById('joy-nub');
+            let startX=0, startY=0;
+
+            const handleMove = (clientX, clientY) => {
+                let dx = clientX - startX;
+                let dy = clientY - startY;
+                const dist = Math.hypot(dx, dy);
+                const maxDist = 50; // 摇杆最大半径
+                
+                // 限制范围
+                if (dist > maxDist) {
+                    dx = (dx / dist) * maxDist;
+                    dy = (dy / dist) * maxDist;
+                }
+                
+                nub.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+                // 输出标准化向量 (-1 ~ 1)
+                this.x = dx / maxDist;
+                this.y = dy / maxDist;
+            };
+
+            area.addEventListener('pointerdown', e => {
+                e.preventDefault(); // 防止页面滚动
+                area.setPointerCapture(e.pointerId); // 锁定输入焦点
+                startX = e.clientX; startY = e.clientY;
+                
+                area.onpointermove = ev => {
+                    ev.preventDefault(); handleMove(ev.clientX, ev.clientY);
+                };
+            });
+
+            const endInput = () => {
+                this.x = 0; this.y = 0;
+                nub.style.transform = `translate(-50%, -50%)`;
+                area.onpointermove = null;
+            };
+            area.addEventListener('pointerup', endInput);
+            area.addEventListener('pointercancel', endInput);
+
+            // 动作按钮 (格挡)
+            const btn = document.getElementById('btn-parry');
+            btn.addEventListener('pointerdown', e => {
+                e.preventDefault();
+                if (Game.player) Game.player.tryParry();
+            });
+        },
+        getAxis() {
+            // 混合输入：键盘优先叠加
+            let dx=0, dy=0;
+            if(this.keys['w']||this.keys['arrowup']) dy-=1;
+            if(this.keys['s']||this.keys['arrowdown']) dy+=1;
+            if(this.keys['a']||this.keys['arrowleft']) dx-=1;
+            if(this.keys['d']||this.keys['arrowright']) dx+=1;
+            
+            // 如果有键盘输入，返回键盘向量，否则返回摇杆
+            return (dx!==0 || dy!==0) ? {x:dx, y:dy} : {x:this.x, y:this.y};
+        }
+    };
+
+    // --- 4. 游戏实体类 (ECS Architecture) ---
+
+    // 玩家飞船
+    class Player {
+        constructor(x, y) {
+            this.x = x; this.y = y;
+            this.hp = 3; 
+            this.vx = 0; this.vy = 0;
+            
+            this.parryTimer = 0; // 弹反判定窗倒计时
+            this.cooldown = 0;   // 弹反冷却
+        }
+        
+        update(dt) {
+            const input = Input.getAxis();
+            
+            // 物理模拟: 强惯性 + 快响应 (参考《几何战争》手感)
+            const acc = 4500 * dt; // 加速度
+            const friction = 0.85; // 摩擦力
+            
+            this.vx += input.x * acc;
+            this.vy += input.y * acc;
+            this.vx *= friction; 
+            this.vy *= friction;
+            
+            // 应用速度
+            this.x += this.vx * dt; 
+            this.y += this.vy * dt;
+            
+            // 边界限制
+            this.x = Math.max(20, Math.min(W-20, this.x));
+            this.y = Math.max(20, Math.min(H-20, this.y));
+            
+            if(this.parryTimer > 0) this.parryTimer -= dt;
+            if(this.cooldown > 0) this.cooldown -= dt;
+        }
+        
+        tryParry() {
+            if (this.cooldown <= 0) {
+                this.parryTimer = 0.25; // 0.25秒完美格挡窗口
+                this.cooldown = 0.5;    // 冷却时间
+                SpawnFX(this.x, this.y, '#fff', 10); // 视觉反馈
+            }
+        }
+        
+        draw(c) {
+            c.translate(this.x, this.y);
+            const active = this.parryTimer > 0;
+            c.fillStyle = active ? '#fff' : '#0ff';
+            
+            // 绘制三角飞船
+            c.beginPath(); 
+            c.moveTo(0, -18); c.lineTo(14, 12); c.lineTo(0, 6); c.lineTo(-14, 12); 
+            c.fill();
+            
+            // 绘制格挡护盾 (教学模式等待中或格挡生效时显示)
+            if (active || Game.waitInput) {
+                c.strokeStyle = active ? '#fff' : 'rgba(0,255,255,0.5)';
+                c.lineWidth = 3;
+                c.beginPath(); c.arc(0, 0, 120, 0, Math.PI*2); c.stroke();
+            }
+            c.setTransform(1, 0, 0, 1, 0, 0);
+        }
+    }
+
+    // 敌人
+    class Enemy {
+        constructor(x, y) {
+            this.type = 'enemy'; 
+            this.x = x; this.y = y; 
+            this.shootT = 1.5; 
+            this.dead = false;
+        }
+        
+        update(dt) {
+            // AI行为：包抄逻辑
+            const dx = Game.player.x - this.x;
+            const dy = Game.player.y - this.y;
+            const dist = Math.hypot(dx, dy);
+            const angle = Math.atan2(dy, dx);
+            
+            let speed = 150 + (Game.score / 60); // 难度提升: 移速增加
+            
+            // 保持距离攻击
+            if (dist > 300) {
+                this.x += Math.cos(angle) * speed * dt;
+                this.y += Math.sin(angle) * speed * dt;
+            } else {
+                // 侧向移动
+                this.x += Math.cos(angle + 1.5) * speed * 0.6 * dt;
+                this.y += Math.sin(angle + 1.5) * speed * 0.6 * dt;
+            }
+            
+            // 射击
+            this.shootT -= dt;
+            if (this.shootT <= 0) {
+                // 难度提升: 射击频率加快，并使用 Math.max 防止数值崩坏
+                let reloadTime = Math.max(0.5, 2.0 - (Game.score / 3000)); 
+                this.shootT = reloadTime + Math.random() * 0.5;
+                
+                Game.entities.push(new Bullet(this.x, this.y, angle, true));
+                Audio.shoot();
+            }
+        }
+        
+        draw(c) {
+            c.translate(this.x, this.y);
+            c.fillStyle = '#f05'; 
+            c.fillRect(-12, -12, 24, 24);
+            c.setTransform(1, 0, 0, 1, 0, 0);
+        }
+    }
+
+    // 子弹
+    class Bullet {
+        constructor(x, y, a, h) {
+            this.type = 'bullet';
+            this.x = x; this.y = y; this.a = a; 
+            this.hostile = h;
+            
+            // 难度提升: 敌方子弹变快
+            this.spd = h ? (400 + Game.score / 15) : 1200;
+            this.col = h ? '#f05' : '#0ff';
+            this.slowed = false; // 是否触发过时缓
+            this.dead = false;
+        }
+        
+        update(dt) {
+            this.x += Math.cos(this.a) * this.spd * dt;
+            this.y += Math.sin(this.a) * this.spd * dt;
+        }
+        
+        reflect() {
+            this.hostile = false; 
+            this.col = '#0ff'; 
+            this.spd = 1400;
+            
+            // 自动追踪逻辑
+            let target = Game.entities.find(e => e.type === 'enemy' && !e.dead);
+            if (target) {
+                this.a = Math.atan2(target.y - this.y, target.x - this.x);
+            } else {
+                this.a += Math.PI; // 没有敌人则反向
+            }
+        }
+        
+        draw(c) {
+            c.translate(this.x, this.y); c.rotate(this.a);
+            c.fillStyle = this.col;
+            c.fillRect(-10, -3, 20, 6); // 拉长的光束
+            c.setTransform(1, 0, 0, 1, 0, 0);
+        }
+    }
+
+    // 粒子效果
+    class Particle {
+        constructor(x, y, c) {
+            this.x = x; this.y = y; this.c = c;
+            let a = Math.random() * 6.28;
+            let s = Math.random() * 150 + 50;
+            this.vx = Math.cos(a) * s; this.vy = Math.sin(a) * s;
+            this.life = 1.0;
+        }
+        update(dt) {
+            this.x += this.vx * dt; 
+            this.y += this.vy * dt;
+            this.life -= 4.0 * dt; // 消失速度
+        }
+        draw(c) {
+            c.globalAlpha = Math.max(0, this.life);
+            c.fillStyle = this.c;
+            c.fillRect(this.x, this.y, 6, 6);
+            c.globalAlpha = 1;
+        }
+    }
+
+    // --- 5. 游戏主逻辑系统 ---
+
+    function StartGame() {
+        // 初始化
+        Audio.init(); Input.init();
+        
+        // 隐藏UI
+        document.getElementById('overlay').classList.add('hidden');
+        document.getElementById('result-box').style.display = 'none';
+        
+        // 重置数据
+        Game.score = 0;
+        Game.player = new Player(W/2, H/2);
+        Game.entities = [];
+        Game.particles = [];
+        Game.tutorial = true;
+        Game.waitInput = false;
+        Game.timeScale = 1.0;
+        Game.active = true;
+        
+        UpdateHUD();
+        ShowMsg("系统启动 - 准备迎击", "#0ff");
+        
+        Game.lastTime = performance.now();
+        requestAnimationFrame(Loop);
+    }
+
+    function Loop() {
+        if (!Game.active) return;
+        requestAnimationFrame(Loop);
+
+        // 1. 时间计算
+        if (Game.freeze > 0) { Game.freeze--; Render(); return; } // 顿帧
+        
+        let now = performance.now();
+        let dt = Math.min((now - Game.lastTime) / 1000, 0.1);
+        Game.lastTime = now;
+
+        // 时缓自动恢复 (缓动效果)
+        if (Game.timeScale < 1.0) {
+            let target = Game.waitInput ? 0.02 : 1.0; // 等待输入时极慢，否则恢复正常
+            Game.timeScale += (target - Game.timeScale) * 0.15;
+        }
+
+        // 2. 逻辑更新
+        // 玩家永远以真实时间移动 (快银手感)
+        if(Game.player) Game.player.update(dt);
+
+        // 游戏世界时间
+        let sDt = dt * Game.timeScale;
+        Director(sDt); // 刷怪
+        
+        // 更新实体
+        for(let i = Game.entities.length - 1; i >= 0; i--) {
+            let e = Game.entities[i];
+            // 教学模式下敌人子弹略慢
+            let mod = (Game.tutorial && e.type === 'bullet' && e.hostile) ? 0.6 : 1.0;
+            e.update(sDt * mod);
+            
+            // 出界或死亡清理
+            if (e.dead || e.x < -100 || e.x > W+100 || e.y < -100 || e.y > H+100) {
+                Game.entities.splice(i, 1);
+                continue;
+            }
+            
+            CheckCollision(Game.player, e);
+        }
+        
+        // 更新粒子
+        Game.particles.forEach((p, i) => {
+            p.update(sDt);
+            if(p.life <= 0) Game.particles.splice(i, 1);
+        });
+        
+        // 震动衰减
+        if(Game.shake > 0) Game.shake *= 0.9;
+
+        // 3. 渲染
+        Render();
+    }
+
+    function Render() {
+        // 背景 (带微弱拖影)
+        ctx.fillStyle = `rgba(5, 5, 8, ${0.3 + (1-Game.timeScale)*0.4})`;
+        ctx.fillRect(0, 0, W, H);
+        
+        ctx.save();
+        // 屏幕震动
+        if (Game.shake > 0.5) {
+            let dx = (Math.random() - 0.5) * Game.shake;
+            let dy = (Math.random() - 0.5) * Game.shake;
+            ctx.translate(dx, dy);
+        }
+        
+        // 开启高亮叠加模式 (霓虹光效核心)
+        ctx.globalCompositeOperation = 'lighter';
+        
+        // 绘制教学提示圈
+        if (Game.tutorial && Game.player) {
+            ctx.strokeStyle = 'rgba(0, 255, 255, 0.2)';
+            ctx.lineWidth = 2; ctx.setLineDash([10, 10]);
+            ctx.beginPath(); ctx.arc(Game.player.x, Game.player.y, 120, 0, Math.PI*2); ctx.stroke();
+            ctx.setLineDash([]);
+        }
+        
+        // 批量绘制
+        Game.particles.forEach(p => p.draw(ctx));
+        Game.entities.forEach(e => e.draw(ctx));
+        if(Game.player) Game.player.draw(ctx);
+        
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.restore();
+    }
+
+    // 碰撞检测与交互
+    function CheckCollision(p, e) {
+        if (!p || !e) return;
+        const dist = Math.hypot(p.x - e.x, p.y - e.y);
+        
+        if (e.type === 'bullet') {
+            if (e.hostile) {
+                // A. 触发教学慢放
+                if (Game.tutorial && !e.slowed && dist < 160 && dist > 50) {
+                    e.slowed = true;
+                    Game.waitInput = true;
+                    Game.timeScale = 0.02; // 几乎时停
+                    document.getElementById('tut-hint').style.display = 'block';
+                    Audio.slow();
+                }
+
+                // B. 玩家格挡 (判定半径 130)
+                if (p.parryTimer > 0 && dist < 130) {
+                    e.reflect(); // 子弹变色追踪
+                    Audio.parry();
+                    Game.score += 100;
+                    
+                    // 反馈
+                    Game.timeScale = 0.1;
+                    Game.shake = 20;
+                    Game.freeze = 5;
+                    SpawnFX(e.x, e.y, '#0ff', 12);
+                    
+                    // 解除教学状态
+                    if (Game.waitInput) {
+                        Game.waitInput = false;
+                        Game.tutorial = false; // 弹一次就毕业
+                        document.getElementById('tut-hint').style.display = 'none';
+                        ShowMsg("同步率 100% - 限制解除", "#fd0");
+                    }
+                    UpdateHUD();
+                } 
+                // C. 玩家受伤 (被近身)
+                else if (dist < 15) {
+                    if (Game.waitInput) {
+                        // 教学保护 (不算分)
+                        e.reflect();
+                        ShowMsg("自动护盾 (0分)", "#888");
+                        Audio.dull();
+                        Game.waitInput = false;
+                        document.getElementById('tut-hint').style.display = 'none';
+                    } else {
+                        // 真实扣血
+                        e.dead = true;
+                        p.hp--;
+                        SpawnFX(p.x, p.y, '#f05', 20);
+                        Audio.hit();
+                        Game.shake = 30;
+                        UpdateHUD();
+                        
+                        if (p.hp <= 0) GameOver();
+                    }
+                }
+            } else {
+                // 友方子弹 -> 击杀敌人
+                // 使用 enlarged hitbox (35px) 确保反弹必中
+                Game.entities.forEach(en => {
+                    if (en.type === 'enemy' && !en.dead && Math.hypot(en.x - e.x, en.y - e.y) < 35) {
+                        en.dead = true;
+                        e.dead = true;
+                        SpawnFX(en.x, en.y, '#f05', 15);
+                        Audio.kill();
+                        Game.score += 200;
+                        UpdateHUD();
+                    }
+                });
+            }
+        }
+    }
+
+    let spawnTimer = 0;
+    function Director(dt) {
+        // 刷怪数量随分数提升
+        let maxEnemies = Game.tutorial ? 1 : 3 + Math.floor(Game.score / 1000);
+        if(maxEnemies > 8) maxEnemies = 8; // 封顶
+
+        if (Game.entities.filter(e => e.type === 'enemy').length < maxEnemies) {
+            spawnTimer -= dt;
+            if (spawnTimer <= 0) {
+                // 刷怪冷却随分数降低
+                spawnTimer = Math.max(0.5, 2.0 - (Game.score / 3000));
+                
+                // 屏幕边缘生成
+                let ang = Math.random() * 6.28;
+                let radius = Math.max(W, H) / 2 + 50;
+                Game.entities.push(new Enemy(
+                    W/2 + Math.cos(ang) * radius, 
+                    H/2 + Math.sin(ang) * radius
+                ));
+            }
+        }
+    }
+
+    // --- 工具函数 ---
+    function SpawnFX(x, y, c, n) { for(let i=0; i<n; i++) Game.particles.push(new Particle(x, y, c)); }
+    
+    function UpdateHUD() {
+        document.getElementById('ui-score').innerText = Game.score;
+        document.querySelectorAll('.hp-unit').forEach((el, i) => {
+            if (Game.player && i < Game.player.hp) el.classList.remove('lost');
+            else el.classList.add('lost');
+        });
+    }
+
+    function ShowMsg(text, color) {
+        const el = document.getElementById('center-msg');
+        el.innerText = text; el.style.color = color;
+        el.style.opacity = 1; el.style.transform = 'scale(1.2)';
+        setTimeout(() => { el.style.opacity = 0; el.style.transform = 'scale(0.5)'; }, 2000);
+    }
+
+    function GameOver() {
+        Game.active = false;
+        document.getElementById('overlay').classList.remove('hidden');
+        document.getElementById('result-box').style.display = 'block';
+        document.getElementById('end-score').innerText = Game.score;
+        document.getElementById('btn-launch').innerText = "重新接入系统";
+    }
+
+    // 事件绑定
+    document.getElementById('btn-launch').onclick = StartGame;
+    window.onresize = () => { W = window.innerWidth; H = window.innerHeight; canvas.width = W; canvas.height = H; };
+});
+</script>
+</body>
+</html>
